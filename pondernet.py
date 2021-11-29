@@ -7,6 +7,7 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import torch.nn.functional as F
 import torchmetrics
+import pandas as pd
 
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import Callback
@@ -63,7 +64,7 @@ class PonderMNIST(pl.LightningModule):
             Linear module that generates the halting probability at each step.
     '''
 
-    def __init__(self, n_hidden, n_hidden_lin, n_hidden_cnn, kernel_size, max_steps, lambda_p, beta, lr):
+    def __init__(self, n_hidden, n_hidden_lin, n_hidden_cnn, kernel_size, max_steps, lambda_p, beta, lr, model_dir=""):
         super().__init__()
 
         # attributes
@@ -73,6 +74,7 @@ class PonderMNIST(pl.LightningModule):
         self.beta = beta
         self.n_hidden = n_hidden
         self.lr = lr
+        self.model_dir = model_dir
 
         # modules
         self.cnn = CNN(n_input=28, kernel_size=kernel_size, n_output=n_hidden_cnn)
@@ -186,14 +188,20 @@ class PonderMNIST(pl.LightningModule):
             loss : torch.Tensor
                 Loss value of the current batch.
         '''
-        loss, _, acc, steps = self._get_loss_and_metrics(batch)
+        loss, _, acc, steps, steps_std, steps_qtl = self._get_loss_and_metrics(batch)
+        steps_25, steps_50, steps_75 = steps_qtl
 
         # logging
-        self.log('train/steps', steps)
-        self.log('train/accuracy', acc)
-        self.log('train/total_loss', loss.get_total_loss())
-        self.log('train/reconstruction_loss', loss.get_rec_loss())
-        self.log('train/regularization_loss', loss.get_reg_loss())
+        mode = 'train'
+        self.log(f'{mode}/steps', steps)
+        self.log(f'{mode}/steps_std', steps_std)
+        self.log(f'{mode}/steps_25', steps_25)
+        self.log(f'{mode}/steps_50', steps_50)
+        self.log(f'{mode}/steps_75', steps_75)
+        self.log(f'{mode}/accuracy', acc)
+        self.log(f'{mode}/total_loss', loss.get_total_loss())
+        self.log(f'{mode}/reconstruction_loss', loss.get_rec_loss())
+        self.log(f'{mode}/regularization_loss', loss.get_reg_loss())
 
         return loss.get_total_loss()
 
@@ -212,17 +220,31 @@ class PonderMNIST(pl.LightningModule):
             preds : torch.Tensor
                 Predictions for the current batch.
         '''
-        loss, preds, acc, steps = self._get_loss_and_metrics(batch)
+        loss, preds, acc, steps, steps_std, steps_qtl = self._get_loss_and_metrics(batch)
+        steps_25, steps_50, steps_75 = steps_qtl
 
         # logging
-        self.log('val/steps', steps)
-        self.log('val/accuracy', acc)
-        self.log('val/total_loss', loss.get_total_loss())
-        self.log('val/reconstruction_loss', loss.get_rec_loss())
-        self.log('val/regularization_loss', loss.get_reg_loss())
+        mode = 'val'
+        self.log(f'{mode}/steps', steps)
+        self.log(f'{mode}/steps_std', steps_std)
+        self.log(f'{mode}/steps_25', steps_25)
+        self.log(f'{mode}/steps_50', steps_50)
+        self.log(f'{mode}/steps_75', steps_75)
+        self.log(f'{mode}/accuracy', acc)
+        self.log(f'{mode}/total_loss', loss.get_total_loss())
+        self.log(f'{mode}/reconstruction_loss', loss.get_rec_loss())
+        self.log(f'{mode}/regularization_loss', loss.get_reg_loss())
 
         # for custom callback
         return preds
+
+
+    # def validation_epoch_end(self, validation_step_outputs):
+    #     dummy_input = torch.zeros((10, 1, 5, 5), device=self.device)
+    #     model_filename = f"{self.model_dir}/model_{str(self.global_step).zfill(5)}.onnx"
+    #     torch.onnx.export(self, dummy_input, model_filename, opset_version=11)
+    #     wandb.save(model_filename)
+
 
     def test_step(self, batch, batch_idx, dataset_idx=0):
         '''
@@ -241,12 +263,28 @@ class PonderMNIST(pl.LightningModule):
             steps : torch.Tensor
                 Average number of steps for the current batch.
         '''
-        _, _, acc, steps = self._get_loss_and_metrics(batch)
+        _, _, acc, steps, steps_std, steps_qtl = self._get_loss_and_metrics(batch)
+        steps_25, steps_50, steps_75 = steps_qtl
 
         # logging
-        self.log(f'test_{dataset_idx}/steps', steps)
-        self.log(f'test_{dataset_idx}/accuracy', acc)
+        # self.log(f'test/steps/{dataset_idx}', steps)
+        # self.log(f'test/accuracy/{dataset_idx}', acc)
 
+        mode = 'test'
+        self.log(f'{mode}/steps', steps)
+        self.log(f'{mode}/steps_std', steps_std)
+        self.log(f'{mode}/steps_25', steps_25)
+        self.log(f'{mode}/steps_50', steps_50)
+        self.log(f'{mode}/steps_75', steps_75)
+        self.log(f'{mode}/accuracy', acc)
+
+
+    # def test_epoch_end(self, test_step_outputs):
+    #     dummy_input = torch.zeros((10, 1, 5, 5), device=self.device)
+    #     model_filename = f"{self.model_dir}/model_{str(self.current_epoch).zfill(2)}.onnx"
+    #     self.to_onnx(model_filename, dummy_input, export_params=True)
+    #     wandb.save(model_filename)
+    
     def configure_optimizers(self):
         '''
             Configure the optimizers and learning rate schedulers.
@@ -270,7 +308,7 @@ class PonderMNIST(pl.LightningModule):
 
     def configure_callbacks(self):
         '''returns a list of callbacks'''
-        # we choose high patience sine we validate 4 times per epoch to have nice graphs
+        # we choose high patience since we validate 4 times per epoch to have nice graphs
         early_stopping = EarlyStopping(monitor='val/accuracy', mode='max', patience=6)
         model_checkpoint = ModelCheckpoint(monitor="val/accuracy", mode='max')
         log_predictions = LogPredictionsCallback()
@@ -327,8 +365,10 @@ class PonderMNIST(pl.LightningModule):
 
         # calculate the average number of steps
         steps = (halted_step * 1.0).mean()
+        steps_std = (halted_step * 1.0).std()
+        steps_qtl = pd.Series((halted_step * 1.0)).quantile([0.25, 0.5, 0.75])
 
-        return loss, preds, acc, steps
+        return loss, preds, acc, steps, steps_std, steps_qtl
 
 
 class LogPredictionsCallback(Callback):

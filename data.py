@@ -3,6 +3,8 @@ from torchvision.datasets import MNIST
 from torchvision import transforms
 
 import pytorch_lightning as pl
+import torch
+import numpy as np
 
 
 class MNIST_DataModule(pl.LightningDataModule):
@@ -89,28 +91,89 @@ class MNIST_DataModule(pl.LightningDataModule):
 
 def get_transforms():
     # define transformations
-    transform_22 = transforms.Compose([
-        transforms.RandomRotation(degrees=22.5),
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
-    ])
-    transform_45 = transforms.Compose([
-        transforms.RandomRotation(degrees=45),
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
-    ])
-    transform_67 = transforms.Compose([
-        transforms.RandomRotation(degrees=67.5),
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
-    ])
-    transform_90 = transforms.Compose([
-        transforms.RandomRotation(degrees=90),
+    _transform = lambda degrees: transforms.Compose([
+        transforms.RandomRotation(degrees=degrees),
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,))
     ])
 
-    train_transform = transform_22
-    test_transform = [transform_22, transform_45, transform_67, transform_90]
+    degrees = np.linspace(0, 180, 7)
+    test_transform = np.vectorize(_transform)(degrees)
+
+    train_transform = test_transform[0]
+
+    return train_transform, test_transform
+
+def get_transforms2():
+    # define transformations
+    _transform = lambda degrees: transforms.Compose([
+        transforms.RandomRotation(degrees=[degrees]*2),
+        transforms.ToTensor(),
+        transforms.Normalize((0.1307,), (0.3081,))
+    ])
+
+    degrees = np.linspace(0, 180, 7)
+    test_transform = np.vectorize(_transform)(degrees)
+
+    train_transform = test_transform[0]
+
+    return train_transform, test_transform
+
+
+def get_occlusion_transforms():
+    # define transformations
+    _transform = lambda p: transforms.Compose([
+        transforms.PILToTensor(),
+        # transforms.ToTensor(),
+        transforms.ConvertImageDtype(torch.float),
+        transforms.Normalize((0.1307,), (0.3081,)),
+        transforms.RandomErasing(p=p, value='random'),
+    ])
+
+    ps = np.linspace(0, 1, 11)
+    test_transform = np.vectorize(_transform)(ps)
+
+    train_transform = test_transform[0]
+
+
+    return train_transform, test_transform
+
+
+def get_pixelated_transforms():
+    # define transformations
+    _transform = lambda p: transforms.Compose([
+        transforms.PILToTensor(),
+        # transforms.ToTensor(),
+        transforms.ConvertImageDtype(torch.float),
+        transforms.Resize(p),
+        transforms.Resize(28),
+        transforms.Normalize((0.1307,), (0.3081,)),
+    ])
+
+    ps = np.arange(28, 1, step=-4)
+    test_transform = [_transform(int(p)) for p in ps]
+
+    train_transform = test_transform[0]
+
+
+    return train_transform, test_transform
+
+
+def get_perspective_transforms():
+    # define transformations
+    _transform = lambda p: transforms.Compose([
+        transforms.PILToTensor(),
+        # transforms.ToTensor(),
+        transforms.ConvertImageDtype(torch.float),
+        transforms.RandomPerspective(p, p=1),
+        transforms.Normalize((0.1307,), (0.3081,)),
+    ])
+
+    ps = np.linspace(0, 1, 11)
+    # ps = rots
+    test_transform = np.vectorize(_transform)(ps)
+
+    train_transform = test_transform[0]
+
 
     return train_transform, test_transform

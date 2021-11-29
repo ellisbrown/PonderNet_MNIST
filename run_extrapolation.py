@@ -34,9 +34,11 @@ if __name__ == "__main__":
                         n_hidden_lin=N_HIDDEN_LIN,
                         kernel_size=KERNEL_SIZE,
                         max_steps=MAX_STEPS,
-                        lambda_p=LAMBDA_P,
+                        # lambda_p=LAMBDA_P,
+                        lambda_p=1./10.,
                         beta=BETA,
-                        lr=LR)
+                        lr=LR,
+                        model_dir="extrapolation")
 
     # setup logger
     logger = WandbLogger(project='PonderNet', name='extrapolation', offline=False)
@@ -44,15 +46,25 @@ if __name__ == "__main__":
 
     trainer = Trainer(
         logger=logger,                      # W&B integration
-        gpus=-1,                            # use all available GPU's
+        # gpus=-1,                            # use all available GPU's
         max_epochs=EPOCHS,                  # maximum number of epochs
         gradient_clip_val=GRAD_NORM_CLIP,   # gradient clipping
         val_check_interval=0.25,            # validate 4 times per epoch
-        precision=16,                       # train in half precision
-        deterministic=True)                 # for reproducibility
-
+        # precision=16,                       # train in half precision
+        deterministic=True,                 # for reproducibility
+        default_root_dir="extrapolation")
+    
     # fit the model
-    trainer.fit(model, datamodule=mnist)
+    # trainer.fit(model, datamodule=mnist)
+    # trainer.save_checkpoint(filepath="extrapolation_fit.ckpt")
+
+    # chk_path = "extrapolation/PonderNet/v7wbsxku/checkpoints/epoch=6-step=3007.ckpt"
+    chk_path = "extrapolation_fit.ckpt"
+    model.load_from_checkpoint(chk_path)
 
     # evaluate on the test set
     trainer.test(model, datamodule=mnist)
+
+
+
+    
